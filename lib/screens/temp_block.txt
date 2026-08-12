@@ -1,0 +1,226 @@
+﻿  Widget _buildStreamSelectors(List<StreamInfo> streams) {
+    if (_format == DownloadFormat.video) {
+      final videoStreams = streams.whereType<VideoStreamInfo>().toList();
+      
+      final qualities = videoStreams.map((e) => e.qualityLabel).toSet().toList();
+      qualities.sort((a, b) => int.parse(b.replaceAll(RegExp(r'[^0-9]'), '')).compareTo(int.parse(a.replaceAll(RegExp(r'[^0-9]'), ''))));
+      
+      // All FPS available for the current quality (or all if none)
+      final allFps = videoStreams.map((e) => e.framerate.framesPerSecond).toSet().toList();
+      allFps.sort((a, b) => b.compareTo(a));
+      
+      // All Codecs available
+      final allCodecs = videoStreams.map((e) => _simplifyCodec(e.videoCodec)).toSet().toList();
+      
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildChipGroup<String>(
+            title: 'РљРђР§Р•РЎРўР’Рћ',
+            value: _selectedQuality,
+            items: qualities,
+            labelBuilder: (q) => q,
+            onSelected: (val) => setState(() => _selectedQuality = val),
+          ),
+          _buildChipGroup<num>(
+            title: 'FPS',
+            value: _selectedFps,
+            items: allFps,
+            labelBuilder: (f) => f.toInt().toString(),
+            onSelected: (val) => setState(() => _selectedFps = val),
+          ),
+          _buildChipGroup<String>(
+            title: 'РљРћР”Р•Рљ',
+            value: _selectedCodec,
+            items: allCodecs,
+            labelBuilder: (c) => c,
+            onSelected: (val) => setState(() => _selectedCodec = val),
+          ),
+        ],
+      );
+    } else if (_format == DownloadFormat.audio) {
+      final audioStreams = streams.whereType<AudioOnlyStreamInfo>().toList();
+      final bitrates = audioStreams.map((e) => e.bitrate.kiloBitsPerSecond.round()).toSet().toList();
+      bitrates.sort((a, b) => b.compareTo(a));
+      
+      final codecs = audioStreams.map((e) => _simplifyCodec(e.audioCodec)).toSet().toList();
+      
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildChipGroup<int>(
+            title: 'Р‘РРўР Р•Р™Рў',
+            value: _selectedBitrate,
+            items: bitrates,
+            labelBuilder: (b) => '${b}k',
+            onSelected: (val) => setState(() => _selectedBitrate = val),
+          ),
+          _buildChipGroup<String>(
+            title: 'РљРћР”Р•Рљ',
+            value: _selectedAudioCodec,
+            items: codecs,
+            labelBuilder: (c) => c,
+            onSelected: (val) => setState(() => _selectedAudioCodec = val),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'РўР•Р“Р (ID3)',
+            style: GoogleFonts.inter(
+              color: const Color(0xFF8A8A9E),
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFF16161F),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFF2A2A3A)),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: TextField(
+              controller: _titleController,
+              style: GoogleFonts.inter(color: Colors.white, fontSize: 14),
+              decoration: InputDecoration(
+                border: InputBorder.none,
+                hintText: 'РќР°Р·РІР°РЅРёРµ',
+                hintStyle: GoogleFonts.inter(color: const Color(0xFF5A5A6E)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFF16161F),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFF2A2A3A)),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: TextField(
+              controller: _authorController,
+              style: GoogleFonts.inter(color: Colors.white, fontSize: 14),
+              decoration: InputDecoration(
+                border: InputBorder.none,
+                hintText: 'РСЃРїРѕР»РЅРёС‚РµР»СЊ',
+                hintStyle: GoogleFonts.inter(color: const Color(0xFF5A5A6E)),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+    return const SizedBox.shrink();
+  }
+
+  // РњР°РїРїРёРЅРі РІС‹Р±СЂР°РЅРЅС‹С… Р·РЅР°С‡РµРЅРёР№ -> TikTok API
+  String get _tikTokQualityMapped {
+    const hd = {'4K', '1440p', '1080p', '720p'};
+    return hd.contains(_selectedQuality) ? 'HD (Р‘РµР· РІРѕРґСЏРЅРѕРіРѕ Р·РЅР°РєР°)' : 'SD (Р‘РµР· РІРѕРґСЏРЅРѕРіРѕ Р·РЅР°РєР°)';
+  }
+
+  String get _tikTokCodecMapped =>
+      _selectedCodec == 'H.265' ? 'H.265 (HEVC)' : 'H.264';
+
+  String get _tikTokAudioCodecMapped {
+    if (_selectedAudioCodec == 'FLAC') return 'FLAC';
+    if (_selectedAudioCodec == 'MP3') return 'MP3';
+    return 'AAC';
+  }
+
+  Widget _buildTikTokUnifiedSelectors() {
+    if (_format == DownloadFormat.video) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildChipGroup<String>(
+            title: 'РљРђР§Р•РЎРўР’Рћ',
+            value: _selectedQuality,
+            items: ['4K', '1440p', '1080p', '720p', '480p', '360p'],
+            labelBuilder: (q) => q,
+            onSelected: (val) => setState(() => _selectedQuality = val),
+          ),
+          _buildChipGroup<String>(
+            title: 'РљРћР”Р•Рљ',
+            value: _selectedCodec,
+            items: ['H.264', 'H.265', 'VP9', 'AV1'],
+            labelBuilder: (c) => c,
+            onSelected: (val) => setState(() => _selectedCodec = val),
+          ),
+        ],
+      );
+    } else if (_format == DownloadFormat.audio) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildChipGroup<int>(
+            title: 'Р‘РРўР Р•Р™Рў',
+            value: _selectedBitrate,
+            items: [320, 256, 160, 128, 64],
+            labelBuilder: (b) => '${b}k',
+            onSelected: (val) => setState(() => _selectedBitrate = val),
+          ),
+          _buildChipGroup<String>(
+            title: 'РљРћР”Р•Рљ',
+            value: _selectedAudioCodec,
+            items: ['MP3', 'AAC', 'Opus', 'FLAC'],
+            labelBuilder: (c) => c,
+            onSelected: (val) => setState(() => _selectedAudioCodec = val),
+          ),
+        ],
+      );
+    }
+    return const SizedBox.shrink();
+  }
+
+  Widget _buildTikTokAudioTags() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'РўР•Р“Р (ID3)',
+          style: GoogleFonts.inter(
+            color: const Color(0xFF8A8A9E),
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFF16161F),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFF2A2A3A)),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: TextField(
+            controller: _titleController,
+            style: GoogleFonts.inter(color: Colors.white, fontSize: 14),
+            decoration: InputDecoration(
+              border: InputBorder.none,
+              hintText: 'РќР°Р·РІР°РЅРёРµ',
+              hintStyle: GoogleFonts.inter(color: const Color(0xFF5A5A6E)),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFF16161F),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFF2A2A3A)),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: TextField(
+            controller: _authorController,
+            style: GoogleFonts.inter(color: Colors.white, fontSize: 14),
+            decoration: InputDecoration(
+              border: InputBorder.none,
+              hintText: 'РСЃРїРѕР»РЅРёС‚РµР»СЊ',
+              hintStyle: GoogleFonts.inter(color: const Color(0xFF5A5A6E)),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
