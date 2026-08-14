@@ -248,12 +248,12 @@ class DownloadService {
 
       Future<void> downloadStream(StreamInfo info, String savePath, double progressStart, double progressLength) async {
         final total = info.size.totalBytes;
-        int received = 0;
         
         int chunkSize = 10485760; // 10MB chunks
         int numChunks = (total / chunkSize).ceil();
         if (numChunks == 0) numChunks = 1;
         
+        List<int> chunkProgress = List.filled(numChunks, 0);
         int nextChunkIndex = 0;
         
         Future<void> worker() async {
@@ -277,8 +277,16 @@ class DownloadService {
             int retries = 0;
             while (retries < 10) {
               try {
+                chunkProgress[chunkIndex] = 0;
                 final response = await _dio.get(
                   requestUrl,
+                  onReceiveProgress: (count, _) {
+                    chunkProgress[chunkIndex] = count;
+                    int totalReceived = chunkProgress.fold(0, (sum, element) => sum + element);
+                    if (total > 0) {
+                      onProgress(progressStart + (totalReceived / total) * progressLength);
+                    }
+                  },
                   options: Options(
                     responseType: ResponseType.bytes,
                     receiveTimeout: const Duration(seconds: 120),
@@ -295,11 +303,6 @@ class DownloadService {
                 
                 final List<int> bytes = response.data;
                 chunkFile.writeAsBytesSync(bytes);
-                received += bytes.length;
-                
-                if (total > 0) {
-                  onProgress(progressStart + (received / total) * progressLength);
-                }
                 break;
               } catch (e) {
                 retries++;
