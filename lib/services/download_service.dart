@@ -249,22 +249,30 @@ class DownloadService {
       Future<void> downloadStream(StreamInfo info, String savePath, double progressStart, double progressLength) async {
         final total = info.size.totalBytes;
         int received = 0;
-        final file = File(savePath);
-        final raf = file.openSync(mode: FileMode.write);
         
-        try {
-          // Download in 5MB chunks to avoid YouTube throttling/disconnects
-          while (received < total) {
-            int end = received + 5000000 - 1;
+        int chunkSize = 10485760; // 10MB chunks
+        int numChunks = (total / chunkSize).ceil();
+        if (numChunks == 0) numChunks = 1;
+        
+        int nextChunkIndex = 0;
+        
+        Future<void> worker() async {
+          while (nextChunkIndex < numChunks) {
+            int chunkIndex = nextChunkIndex++;
+            int start = chunkIndex * chunkSize;
+            int end = start + chunkSize - 1;
             if (end >= total) end = total - 1;
             
             // YouTube requires the range in the URL query for Web clients, NOT as an HTTP header!
             String requestUrl = info.url.toString();
             if (requestUrl.contains('?')) {
-              requestUrl += '&range=$received-$end';
+              requestUrl += '&range=$start-$end';
             } else {
-              requestUrl += '?range=$received-$end';
+              requestUrl += '?range=$start-$end';
             }
+            
+            String chunkPath = '${savePath}_chunk_$chunkIndex';
+            File chunkFile = File(chunkPath);
             
             int retries = 0;
             while (retries < 10) {
@@ -286,7 +294,7 @@ class DownloadService {
                 );
                 
                 final List<int> bytes = response.data;
-                raf.writeFromSync(bytes);
+                chunkFile.writeAsBytesSync(bytes);
                 received += bytes.length;
                 
                 if (total > 0) {
@@ -295,13 +303,33 @@ class DownloadService {
                 break;
               } catch (e) {
                 retries++;
-                if (retries >= 10) rethrow;
+                if (retries >= 10) throw Exception("Сбой сети: ${e.toString()}");
                 await Future.delayed(const Duration(seconds: 3));
               }
             }
           }
-        } catch (e) {
-          throw Exception("Сбой сети: ${e.toString()}");
+        }
+        
+        // Use 4 concurrent connections
+        List<Future<void>> workers = [];
+        int concurrency = 4;
+        for (int i = 0; i < concurrency; i++) {
+          workers.add(worker());
+        }
+        await Future.wait(workers);
+        
+        // Merge chunks
+        final file = File(savePath);
+        final raf = file.openSync(mode: FileMode.write);
+        try {
+          for (int i = 0; i < numChunks; i++) {
+            String chunkPath = '${savePath}_chunk_$i';
+            File chunkFile = File(chunkPath);
+            if (chunkFile.existsSync()) {
+              raf.writeFromSync(chunkFile.readAsBytesSync());
+              chunkFile.deleteSync();
+            }
+          }
         } finally {
           raf.closeSync();
         }
