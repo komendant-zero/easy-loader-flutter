@@ -412,20 +412,45 @@ class DownloadService {
           targetAudioBitrate: targetAudioBitrate,
           targetAudioCodec: targetAudioCodec ?? (audioCodec == 'copy' ? null : 'AAC'),
         );
+        int totalDur = video.duration?.inSeconds ?? 0;
         if (isDesktop) {
           final ffmpegPath = await _getDesktopFfmpeg();
-          final result = await Process.run(ffmpegPath, args);
+          final process = await Process.start(ffmpegPath, args);
+          process.stderr.transform(utf8.decoder).listen((data) {
+            if (totalDur > 0) {
+              final match = RegExp(r'time=(\d+):(\d+):(\d+\.\d+)').firstMatch(data);
+              if (match != null) {
+                final h = int.parse(match.group(1)!);
+                final m = int.parse(match.group(2)!);
+                final s = double.parse(match.group(3)!);
+                final seconds = h * 3600 + m * 60 + s;
+                double p = seconds / totalDur;
+                if (p > 1.0) p = 1.0;
+                onProgress(0.85 + (p * 0.14));
+              }
+            }
+          });
+          final exitCode = await process.exitCode;
           
           try {
             File(videoPath).deleteSync();
             File(audioPath).deleteSync();
           } catch (_) {}
 
-          if (result.exitCode != 0) {
-            throw Exception('Ошибка FFmpeg: ${result.stderr}');
-          }
+          if (exitCode != 0) throw Exception('Ошибка FFmpeg');
         } else {
-          final session = await FFmpegKit.executeWithArguments(args);
+          final session = await FFmpegKit.executeWithArgumentsAsync(args, (s) {}, (l) {}, (statistics) {
+             int timeMs = statistics.getTime();
+             if (totalDur > 0 && timeMs > 0) {
+               double p = (timeMs / 1000) / totalDur;
+               if (p > 1.0) p = 1.0;
+               onProgress(0.85 + p * 0.14);
+             }
+          });
+          
+          while (await session.getReturnCode() == null) {
+            await Future.delayed(const Duration(milliseconds: 200));
+          }
           final returnCode = await session.getReturnCode();
           
           try {
@@ -487,50 +512,64 @@ class DownloadService {
         final author = customAuthor ?? video.author;
         final audioCodec = isSourceMp4 ? 'copy' : 'aac';
 
+        int totalDur = video.duration?.inSeconds ?? 0;
+        final args = _buildFfmpegArgs(
+          videoPath: null,
+          audioPath: tempAudioPath,
+          outPath: finalPath,
+          thumbPath: File(thumbPath).existsSync() ? thumbPath : null,
+          title: title,
+          artist: author,
+          targetAudioBitrate: targetAudioBitrate,
+          targetAudioCodec: targetAudioCodec ?? (audioCodec == 'copy' ? null : 'AAC'),
+          isAudioOnly: true,
+        );
+        
         if (isDesktop) {
-          final args = _buildFfmpegArgs(
-            videoPath: null,
-            audioPath: tempAudioPath,
-            outPath: finalPath,
-            thumbPath: File(thumbPath).existsSync() ? thumbPath : null,
-            title: title,
-            artist: author,
-            targetAudioBitrate: targetAudioBitrate,
-            targetAudioCodec: targetAudioCodec ?? (audioCodec == 'copy' ? null : 'AAC'),
-            isAudioOnly: true,
-          );
-          
           final ffmpegPath = await _getDesktopFfmpeg();
-          final result = await Process.run(ffmpegPath, args);
+          final process = await Process.start(ffmpegPath, args);
+          process.stderr.transform(utf8.decoder).listen((data) {
+            if (totalDur > 0) {
+              final match = RegExp(r'time=(\d+):(\d+):(\d+\.\d+)').firstMatch(data);
+              if (match != null) {
+                final h = int.parse(match.group(1)!);
+                final m = int.parse(match.group(2)!);
+                final s = double.parse(match.group(3)!);
+                final seconds = h * 3600 + m * 60 + s;
+                double p = seconds / totalDur;
+                if (p > 1.0) p = 1.0;
+                onProgress(0.85 + (p * 0.14));
+              }
+            }
+          });
+          final exitCode = await process.exitCode;
+          
           try {
             File(tempAudioPath).deleteSync();
             if (File(thumbPath).existsSync()) File(thumbPath).deleteSync();
           } catch (_) {}
-          
-          if (result.exitCode != 0) {
-            throw Exception('Ошибка FFmpeg: ${result.stderr}');
-          }
-        } else {
-          final args = _buildFfmpegArgs(
-            videoPath: null,
-            audioPath: tempAudioPath,
-            outPath: finalPath,
-            thumbPath: File(thumbPath).existsSync() ? thumbPath : null,
-            title: title,
-            artist: author,
-            targetAudioBitrate: targetAudioBitrate,
-            targetAudioCodec: targetAudioCodec ?? (audioCodec == 'copy' ? null : 'AAC'),
-            isAudioOnly: true,
-          );
 
-          final session = await FFmpegKit.executeWithArguments(args);
+          if (exitCode != 0) throw Exception('Ошибка FFmpeg');
+        } else {
+          final session = await FFmpegKit.executeWithArgumentsAsync(args, (s) {}, (l) {}, (statistics) {
+             int timeMs = statistics.getTime();
+             if (totalDur > 0 && timeMs > 0) {
+               double p = (timeMs / 1000) / totalDur;
+               if (p > 1.0) p = 1.0;
+               onProgress(0.85 + p * 0.14);
+             }
+          });
+          
+          while (await session.getReturnCode() == null) {
+            await Future.delayed(const Duration(milliseconds: 200));
+          }
           final returnCode = await session.getReturnCode();
           
           try {
             File(tempAudioPath).deleteSync();
             if (File(thumbPath).existsSync()) File(thumbPath).deleteSync();
           } catch (_) {}
-          
+
           if (returnCode == null || !returnCode.isValueSuccess()) {
             final logs = await session.getLogsAsString();
             throw Exception('Ошибка FFmpeg: $logs');
@@ -626,15 +665,14 @@ class DownloadService {
       );
       
       onProgress(0.98);
+      int totalDuration = 15; // default 15s for TikTok
+      if (tiktokData['duration'] != null && tiktokData['duration'] is int) {
+          totalDuration = tiktokData['duration'] as int;
+      }
+      
       if (isDesktop) {
         final ffmpegPath = await _getDesktopFfmpeg();
         final process = await Process.start(ffmpegPath, args);
-        
-        // Try to estimate total duration
-        int totalDuration = 15; // default 15s for TikTok
-        if (tiktokData['duration'] != null && tiktokData['duration'] is int) {
-            totalDuration = tiktokData['duration'] as int;
-        }
         
         process.stderr.transform(utf8.decoder).listen((data) {
           if (totalDuration > 0) {
@@ -653,7 +691,17 @@ class DownloadService {
         });
         await process.exitCode;
       } else {
-        await FFmpegKit.executeWithArguments(args);
+        final session = await FFmpegKit.executeWithArgumentsAsync(args, (s) {}, (l) {}, (statistics) {
+             int timeMs = statistics.getTime();
+             if (totalDuration > 0 && timeMs > 0) {
+               double p = (timeMs / 1000) / totalDuration;
+               if (p > 1.0) p = 1.0;
+               onProgress(0.90 + p * 0.08); // up to 0.98
+             }
+        });
+        while (await session.getReturnCode() == null) {
+          await Future.delayed(const Duration(milliseconds: 200));
+        }
       }
       try { File(finalPath).deleteSync(); } catch (_) {}
       
